@@ -1,0 +1,14 @@
+# Security: API Keys and Credentials
+.env
+
+# Python Cache
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# Project Data & Databases (Heavy files)
+data/raw_pdfs/
+artifacts/
+
+# OS generated files
+.DS_Store
