@@ -1,15 +1,44 @@
-langchain
-langchain-community
-langchain-text-splitters
-langchain-chroma
-langchain-huggingface
-langchain-groq
-chromadb
-rank_bm25
-sentence-transformers
-pypdf
-matplotlib
-seaborn
-python-dotenv
-pandas
-pydantic
+# ============================================================
+# Financial Intelligence Engine — Pinned Dependencies
+# Verified compatible with Google Colab Python 3.12 (April 2026)
+# ============================================================
+
+# --- Core LangChain Ecosystem ---
+# langchain-core version intentionally unpinned to allow pip to
+# resolve the correct version that satisfies all langchain packages.
+# Pinning 0.3.55 caused ResolutionImpossible on Colab due to
+# conflicts with langchain-community and langchain-groq sub-deps.
+langchain==0.3.25
+langchain-community==0.3.24
+langchain-text-splitters==0.3.8
+langchain-chroma==0.2.4
+langchain-huggingface==0.1.2
+langchain-groq==0.3.2
+
+# --- Vector Store & Embeddings ---
+chromadb==0.6.3
+sentence-transformers==3.4.1
+
+# --- Sparse Retrieval ---
+rank_bm25==0.2.2
+
+# --- PDF Parsing ---
+pypdf==5.4.0
+
+# --- LLM API ---
+groq==0.23.1
+
+# --- Structured Output Validation ---
+pydantic==2.11.3
+
+# --- Data & Visualization ---
+pandas==2.2.3
+matplotlib==3.10.1
+seaborn==0.13.2
+numpy==2.2.4
+
+# --- Reliability & Retry Logic ---
+tenacity==9.1.2
+
+# --- Security & Utilities ---
+python-dotenv==1.1.0
