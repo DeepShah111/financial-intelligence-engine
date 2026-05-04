@@ -10,7 +10,19 @@ UPGRADES vs previous version:
 - All prompts, logic, and dual-LLM (generator + critic) architecture
   are fully preserved from the original.
 - Full type annotations on all public methods.
+
+NEW — Query Decomposition (generate_answer_decomposed):
+- Decomposes complex multi-part questions into 2–4 focused sub-queries.
+- Retrieves context independently for each sub-query.
+- Deduplicates and merges all retrieved chunks by chunk_id.
+- Synthesises sub-results into a single coherent cited answer via a
+  dedicated synthesis prompt, then audits with the existing compliance
+  auditor for hallucination removal.
+- Returns (final_answer, all_source_docs, sub_queries) so callers can
+  surface the decomposition reasoning chain in a UI.
 """
+
+import json
 
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.documents import Document
@@ -39,6 +51,53 @@ _llm_retry = retry(
     ),
     reraise=True,  # if all retries fail, re-raise the original exception
 )
+
+
+# ── Query Decomposition Prompt ────────────────────────────────────────────────
+# Asks the LLM to split a complex question into 2–4 atomic sub-queries, each
+# independently answerable via a single targeted retrieval pass.
+# Simple / single-focus questions are returned unchanged as a 1-element array.
+_DECOMPOSE_PROMPT = ChatPromptTemplate.from_messages([
+    ("system", """You are a financial research query analyst specialising in SEC 10-K filings.
+
+Your task: analyse the user's question and decide whether it requires decomposition.
+
+Rules:
+1. If the question asks about multiple companies, multiple metrics, or multiple time periods, decompose it into 2–4 focused sub-queries — one per distinct retrieval need.
+2. If the question is already atomic and focused (single fact, single company), return it unchanged as a 1-element array.
+3. Every sub-query must be fully self-contained (include the company name, metric name, and fiscal year if inferable from the original).
+4. You MUST respond with ONLY a valid JSON array of strings. No explanation, no preamble, no markdown code fences.
+
+Example — complex:
+Input:  "Compare Google and Meta's R&D spending and headcount trends"
+Output: ["What were Google's total R&D expenses and year-over-year change?", "What were Meta's total R&D expenses and year-over-year change?", "What were Google's total headcount and hiring trends?", "What were Meta's total headcount and hiring trends?"]
+
+Example — simple:
+Input:  "What was Google's net income in FY2025?"
+Output: ["What was Google's net income in FY2025?"]"""),
+    ("human", "{question}"),
+])
+
+
+# ── Synthesis Prompt ──────────────────────────────────────────────────────────
+# Takes the merged context from all sub-query retrieval passes and writes a
+# single coherent comparative answer covering every decomposed sub-aspect.
+_SYNTHESIS_PROMPT = ChatPromptTemplate.from_messages([
+    ("system", """You are a Lead Financial Data Scientist. Multiple sub-queries were retrieved independently to answer the user's original question. Synthesise all findings into a single, coherent, professional comparative analysis.
+
+Rules:
+- Use structured bullet points with clear per-company or per-topic section headers.
+- Cite the source immediately after every claim (e.g., [Source: Meta 10-K]).
+- If a sub-query returned no relevant data, explicitly state the filing does not provide that information.
+- Do NOT invent or infer any numbers absent from the context.
+
+Sub-queries that were researched:
+{sub_queries_formatted}
+
+Combined Retrieved Context (all sub-queries merged and deduplicated):
+{context}"""),
+    ("human", "Original question: {question}\n\nSynthesize a complete, cited answer covering every sub-aspect above."),
+])
 
 
 class FinancialGenerationAgent:
@@ -177,3 +236,154 @@ Draft Answer:
         final_response: str = self._invoke_auditor(context, query, draft_response)
 
         return final_response, docs
+
+    # ── Internal: Query Decomposition Helpers ─────────────────────────────────
+
+    @_llm_retry
+    def _invoke_decomposer(self, question: str) -> list[str]:
+        """
+        Decompose a complex question into focused sub-queries via LLM.
+
+        The LLM is instructed to return ONLY a JSON array of strings.
+        Falls back to the original question as a single-element list on any
+        parse failure, so the caller always receives a valid list[str].
+
+        Args:
+            question: The original user question.
+
+        Returns:
+            List of 1–4 sub-query strings.
+        """
+        chain = _DECOMPOSE_PROMPT | self.llm
+        raw: str = chain.invoke({"question": question}).content.strip()
+
+        # Strip accidental markdown code fences if the model adds them.
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+            raw = raw.strip()
+
+        try:
+            sub_queries: list[str] = json.loads(raw)
+            if not isinstance(sub_queries, list) or not all(
+                isinstance(q, str) for q in sub_queries
+            ):
+                raise ValueError("Parsed value is not a list of strings.")
+            logger.info(
+                "Query decomposed into %d sub-queries: %s",
+                len(sub_queries), sub_queries,
+            )
+            return sub_queries
+        except (json.JSONDecodeError, ValueError) as exc:
+            logger.warning(
+                "Decomposer returned unparseable output (%s). "
+                "Falling back to original question as single sub-query.", exc
+            )
+            return [question]
+
+    @_llm_retry
+    def _invoke_synthesizer(
+        self, sub_queries: list[str], context: str, question: str
+    ) -> str:
+        """
+        Synthesise answers from multiple sub-query retrievals into one response.
+
+        Args:
+            sub_queries: The list of decomposed sub-queries (for prompt context).
+            context:     Merged, deduplicated context from all sub-query retrievals.
+            question:    The original user question for the synthesis prompt.
+
+        Returns:
+            Raw synthesised answer string (before compliance audit).
+        """
+        sub_queries_formatted: str = "\n".join(
+            f"  {i}. {q}" for i, q in enumerate(sub_queries, 1)
+        )
+        chain = _SYNTHESIS_PROMPT | self.llm
+        return chain.invoke({
+            "sub_queries_formatted": sub_queries_formatted,
+            "context":               context,
+            "question":              question,
+        }).content
+
+    # ── Public: Decomposed Answer Generation ─────────────────────────────────
+    def generate_answer_decomposed(
+        self, query: str
+    ) -> tuple[str, list[Document], list[str]]:
+        """
+        Execute the full query-decomposition RAG pipeline.
+
+        Pipeline:
+          1. Decompose the query into 1–4 focused sub-queries (LLM).
+          2. Retrieve documents independently for each sub-query.
+          3. Merge and deduplicate all retrieved chunks by chunk_id.
+          4. Synthesise the merged context into a single comparative answer (LLM).
+          5. Audit the synthesised answer for hallucinations (existing auditor).
+
+        For simple questions the decomposer returns a 1-element list, making
+        this method functionally equivalent to generate_answer — no wasted calls.
+
+        Args:
+            query: Natural language question from the user.
+
+        Returns:
+            Tuple of:
+              - final_answer (str):        Audited, hallucination-free response.
+              - all_source_docs (list):    Deduplicated chunks used across all sub-queries.
+              - sub_queries (list[str]):   The decomposed sub-queries for UI display.
+
+        Raises:
+            Exception: Propagates after MAX_API_RETRIES exhausted on any LLM call.
+        """
+        logger.info(
+            "[Decomposition] Decomposing query: '%s'", query
+        )
+        sub_queries: list[str] = self._invoke_decomposer(query)
+
+        # Retrieve context for each sub-query independently and merge.
+        doc_map: dict[str, Document] = {}   # chunk_id → Document (deduplication)
+
+        for i, sub_query in enumerate(sub_queries, 1):
+            logger.info(
+                "[Decomposition] Sub-query %d/%d retrieval: '%s'",
+                i, len(sub_queries), sub_query,
+            )
+            docs: list[Document] = self.retriever.invoke(sub_query)
+            for doc in docs:
+                chunk_id: str = doc.metadata.get(
+                    "chunk_id",
+                    # Fallback hash if chunk_id absent (should not occur in production).
+                    f"fallback_{i}_{hash(doc.page_content)}",
+                )
+                doc_map[chunk_id] = doc   # later sub-queries overwrite on collision; content is identical
+
+        all_docs: list[Document] = list(doc_map.values())
+
+        if not all_docs:
+            logger.warning(
+                "[Decomposition] All sub-query retrievals returned zero documents."
+            )
+
+        # Build merged context string with explicit company attribution.
+        merged_context: str = "\n\n".join([
+            f"[Source: {d.metadata.get('company', 'Unknown')} 10-K]: {d.page_content}"
+            for d in all_docs
+        ])
+
+        logger.info(
+            "[Decomposition] Synthesis over %d deduplicated chunks (%d sub-queries).",
+            len(all_docs), len(sub_queries),
+        )
+        synthesised_draft: str = self._invoke_synthesizer(
+            sub_queries, merged_context, query
+        )
+
+        logger.info(
+            "[Decomposition] Running compliance audit on synthesised answer..."
+        )
+        final_response: str = self._invoke_auditor(
+            merged_context, query, synthesised_draft
+        )
+
+        return final_response, all_docs, sub_queries

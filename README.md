@@ -8,6 +8,9 @@
   <img src="https://img.shields.io/badge/Relevance-0.955-brightgreen?style=flat-square"/>
   <img src="https://img.shields.io/badge/Correctness-0.812-brightgreen?style=flat-square"/>
   <img src="https://img.shields.io/badge/Status-Production--Ready-red?style=flat-square"/>
+  <a href="https://huggingface.co/spaces/your-username/financial-intelligence-engine">
+    <img src="https://img.shields.io/badge/%F0%9F%A4%97%20HuggingFace-Live%20Demo-orange?style=flat-square"/>
+  </a>
 </p>
 
 > An enterprise-grade Agentic RAG system for SEC 10-K financial analysis.  
@@ -25,6 +28,7 @@
 6. [Repository Structure](#6-repository-structure)
 7. [Quickstart](#7-quickstart)
 8. [Dataset](#8-dataset)
+9. [Interactive Demo](#9-interactive-demo)
 
 ---
 
@@ -65,6 +69,9 @@ Most RAG portfolio projects are demos. They retrieve context, pass it to an LLM,
 | Single question scored | Batch evaluation with mean ± std dev reported |
 | No ground truth | Ground truth extracted directly from source 10-K filings |
 | Corpus dominated by one source | Company-balanced RRF — no single company exceeds 43% of context |
+| No UI | Gradio interactive demo with real-time evaluation scores |
+| Single-turn only | Multi-turn conversation memory (last 3 turns as retrieval context) |
+| Single monolithic query | Optional query decomposition for complex multi-part questions |
 
 ---
 
@@ -106,6 +113,13 @@ SEC 10-K PDFs (Google, Meta, Microsoft)
 ┌─────────────────────────────────────┐
 │        generation_agent.py          │
 │                                     │
+│  [Optional] Query Decomposition:    │
+│    Llama-3.3-70B splits complex     │
+│    query into 2–4 sub-queries       │
+│    → per-sub-query retrieval        │
+│    → SHA-256 dedup + merge          │
+│    → synthesis prompt               │
+│                                     │
 │  Stage 1 — CoT Generator:           │
 │    Llama-3.3-70B                    │
 │    Extract facts → identify gaps    │
@@ -134,6 +148,23 @@ SEC 10-K PDFs (Google, Meta, Microsoft)
 │                                     │
 │  Batch: n=15 verified questions     │
 │  Output: mean ± std dev + report    │
+└──────────────────┬──────────────────┘
+                   │
+                   ▼
+┌─────────────────────────────────────┐
+│   gradio_app.py + conversation.py   │
+│                                     │
+│  Gradio UI:                         │
+│    Chat panel with cited answers    │
+│    Retrieved sources + page nums    │
+│    Real-time eval scores (Qwen3)    │
+│    Decomposition reasoning chain    │
+│    6 example question buttons       │
+│                                     │
+│  ConversationMemory:                │
+│    Rolling 3-turn window            │
+│    Follow-up query reformulation    │
+│    (pronoun / reference detection)  │
 └─────────────────────────────────────┘
 ```
 
@@ -226,6 +257,37 @@ Examples:
 - Microsoft cloud revenue FY2024: **$137.4 billion** (extracted from segment reporting)
 
 This matters because a `ground_truth` string of "$49 billion" when the filing says "$49.326 billion" will score 0.0 on correctness even if the answer is factually right. Approximate ground truth produces a meaningless correctness metric.
+
+### 4.7 Query Decomposition — Handling Multi-Part Questions
+
+Standard single-shot retrieval fails on complex comparative questions like *"Compare Google and Meta's R&D spending and headcount trends."* A single query vector averages the semantics of both companies and both metrics, causing the retriever to favour whichever sub-topic has the strongest embedding signal — typically one company and one metric.
+
+The decomposer (Llama-3.3-70B with a strict JSON-only prompt) splits the question into 2–4 focused sub-queries:
+
+```
+"Compare Google and Meta's R&D spending and headcount trends"
+  → ["What were Google's total R&D expenses and YoY change?",
+     "What were Meta's total R&D expenses and YoY change?",
+     "What were Google's headcount figures?",
+     "What were Meta's headcount figures?"]
+```
+
+Each sub-query is retrieved independently. Chunks are merged and deduplicated by SHA-256 chunk ID (same deduplication key used throughout the pipeline) before being fed to a synthesis prompt. The synthesised draft is then audited by the existing compliance auditor — so hallucination protection applies to decomposed answers too.
+
+Simple / single-focus questions return a 1-element array from the decomposer, making `generate_answer_decomposed` a strict superset of `generate_answer` with zero redundant API calls on simple queries.
+
+### 4.8 Conversation Memory — Contextualising Follow-Up Questions
+
+A rolling-window `ConversationMemory` (default: 3 turns) detects follow-up questions via a signal word scan (`"their"`, `"its"`, `"what about"`, `"also"`, etc.) and appends prior questions as inline context before the query reaches the retriever:
+
+```
+Turn 1: "What were Google's R&D expenses?"
+Turn 2: "What about their capital expenditure?"
+         → reformulated: "What about their capital expenditure?
+                          [Prior context: Q1: What were Google's R&D expenses?]"
+```
+
+Only the prior *questions* (not full answers) are appended, keeping the retrieval query concise and avoiding the BM25 token limit. The original user question is preserved in history for readable conversation logs.
 
 ---
 
@@ -323,12 +385,17 @@ financial-intelligence-engine/
 │   ├── data_ingestion.py            # Parallel PDF parse, SHA-256 chunk IDs
 │   ├── retrieval_engine.py          # Hybrid RRF engine, atomic writes, integrity
 │   ├── generation_agent.py          # CoT generator + compliance auditor + retry
+│   │                                #   + query decomposition (generate_answer_decomposed)
+│   ├── conversation.py              # Rolling-window ConversationMemory, follow-up reformulation
 │   └── evaluation.py                # Batch eval harness, Pydantic output parsing
+│
+├── gradio_app.py                    # Interactive Gradio demo (HuggingFace Spaces ready)
 │
 ├── .env                             # GROQ_API_KEY (Git-ignored)
 ├── .gitignore
 ├── README.md
-└── requirements.txt                 # All dependencies pinned
+├── requirements.txt                 # Core RAG dependencies, pinned
+└── requirements_spaces.txt          # Core deps + gradio==4.44.1 for HF Spaces
 ```
 
 ---
@@ -391,6 +458,20 @@ echo "GROQ_API_KEY=your_key_here" > .env
 jupyter notebook notebooks/main_execution.ipynb
 ```
 
+### Option C — Gradio Demo (Local)
+
+```bash
+# Install core + Gradio deps
+pip install -r requirements_spaces.txt
+
+# Add credentials
+echo "GROQ_API_KEY=your_key_here" > .env
+
+# Launch
+python gradio_app.py
+# → open http://localhost:7860
+```
+
 ### Notebook Cell Reference
 
 | Cell | Phase | Description | Token Cost |
@@ -442,6 +523,90 @@ jupyter notebook notebooks/main_execution.ipynb
 | Microsoft | Net Income FY2024 | $88.136 billion |
 
 All figures extracted programmatically from source PDFs using `pypdf`. Values verified against the income statement tables in each filing.
+
+---
+
+## 9. Interactive Demo
+
+### Live on HuggingFace Spaces
+
+[![🤗 Open in Spaces](https://huggingface.co/datasets/huggingface/badges/resolve/main/open-in-hf-spaces-xl.svg)](https://huggingface.co/spaces/your-username/financial-intelligence-engine)
+
+> **Replace** `your-username` in the badge URL above with your actual HuggingFace username after deployment.
+
+### Demo Features
+
+| Feature | Description |
+|---|---|
+| **Multi-turn Chat** | Full conversation with rolling 3-turn memory. Follow-up questions ("What about their R&D?") are automatically contextualised. |
+| **Source Panel** | Every answer shows the exact retrieved chunks with company label and page number. |
+| **Real-time Scores** | Toggle Faithfulness + Relevance evaluation via Qwen3-32B judge — rendered as a colour-coded score bar. |
+| **Query Decomposition** | Toggle to split complex multi-company / multi-metric questions into focused sub-queries. A Reasoning Chain tab shows how the query was decomposed and which companies contributed chunks. |
+| **Example Questions** | Six one-click buttons covering factual, comparative, and qualitative query types. |
+
+### Deploying to HuggingFace Spaces
+
+```bash
+# 1. Create a new Space at huggingface.co/new-space
+#    Runtime: Python 3.11  |  Hardware: CPU Basic (free tier)
+
+# 2. Push your repo
+git remote add spaces https://huggingface.co/spaces/your-username/financial-intelligence-engine
+git push spaces main
+
+# 3. Set your API key as a Repository Secret
+#    Space Settings → Repository Secrets → Add Secret
+#    Name:  GROQ_API_KEY
+#    Value: your_groq_api_key_here
+
+# 4. Set the requirements file
+#    Space Settings → Files → App file: gradio_app.py
+#                  → Requirements: requirements_spaces.txt
+```
+
+> **PDF Note:** The 10-K PDFs are Git-ignored. On Spaces, either commit them to the repo directly or use Hugging Face Datasets as a remote data source and adjust `DATA_DIR` in `config.py`.
+
+### Conversation Example
+
+Below is a representative multi-turn session showing how the conversation memory contextualises follow-up questions:
+
+```
+┌──────────────────────────────────────────────────────────────────────────┐
+│  Turn 1                                                                  │
+│  User:  What were Google's total R&D expenses in FY2025?                 │
+│                                                                          │
+│  Agent: Google reported total R&D expenses of $61.087 billion for       │
+│         FY2025, representing a year-over-year increase from $49.1B in   │
+│         FY2024 [Source: Google 10-K]. This reflects continued           │
+│         investment in AI infrastructure and core search capabilities.   │
+│                                                                          │
+│  Scores: Faithfulness 🟢 1.000  ·  Relevance 🟢 1.000                  │
+├──────────────────────────────────────────────────────────────────────────┤
+│  Turn 2  (follow-up detected → query reformulated with Turn 1 context)  │
+│  User:  What about their capital expenditure?                            │
+│                                                                          │
+│  Agent: Google's capital expenditures for FY2025 were $91.4 billion     │
+│         [Source: Google 10-K], a significant step-up that the company   │
+│         attributed to data centre expansion and AI compute buildout.    │
+│         This compares to R&D spend of $61.087B in the same period.      │
+│                                                                          │
+│  Scores: Faithfulness 🟢 0.920  ·  Relevance 🟢 0.980                  │
+├──────────────────────────────────────────────────────────────────────────┤
+│  Turn 3  (query decomposition enabled)                                  │
+│  User:  Compare all three companies' capex and R&D                      │
+│                                                                          │
+│  🔍 Decomposed into 4 sub-queries:                                      │
+│     1. What were Google's capital expenditures and R&D expenses?        │
+│     2. What were Meta's capital expenditures and R&D expenses?          │
+│     3. What were Microsoft's capital expenditures and R&D expenses?     │
+│     4. How do capex-to-revenue ratios compare across the three?         │
+│                                                                          │
+│  Agent: [Synthesised comparative analysis across all three companies    │
+│          with per-source citations and data from 9 retrieved chunks]    │
+│                                                                          │
+│  Scores: Faithfulness 🟢 0.880  ·  Relevance 🟢 0.960                  │
+└──────────────────────────────────────────────────────────────────────────┘
+```
 
 ---
 

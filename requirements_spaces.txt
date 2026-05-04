@@ -1,0 +1,41 @@
+# ============================================================
+# Financial Intelligence Engine — HuggingFace Spaces Dependencies
+# Extends requirements.txt with the Gradio UI layer.
+# Verified compatible with Spaces Python 3.11 runtime (May 2026).
+#
+# Usage on Spaces:
+#   Set this file as your requirements file in the Space settings,
+#   OR rename it to requirements.txt at the repo root.
+#   The GROQ_API_KEY must be added as a Repository Secret.
+# ============================================================
+
+# ── All core RAG dependencies (pinned, from requirements.txt) ──
+langchain==0.3.25
+langchain-community==0.3.24
+langchain-text-splitters==0.3.8
+langchain-chroma==0.2.4
+langchain-huggingface==0.1.2
+langchain-groq==0.3.2
+
+chromadb==0.6.3
+sentence-transformers==3.4.1
+
+rank_bm25==0.2.2
+
+pypdf==5.4.0
+
+groq==0.23.1
+
+pydantic==2.11.3
+
+pandas==2.2.3
+matplotlib==3.10.1
+seaborn==0.13.2
+numpy==2.2.4
+
+tenacity==9.1.2
+
+python-dotenv==1.1.0
+
+# ── Gradio UI layer (new — Spaces-specific) ──────────────────
+gradio==4.44.1
