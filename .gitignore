@@ -12,3 +12,6 @@ artifacts/
 # OS generated files
 .DS_Store
 venv311/
+
+assets/
+data/raw_pdfs/
