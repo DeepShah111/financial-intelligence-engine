@@ -187,19 +187,16 @@ class ConversationMemory:
 
         return "\n".join(lines).strip()
 
-    def get_history_as_gradio_pairs(self) -> list[dict]:
+    def get_history_as_gradio_pairs(self) -> list[list]:
         """
-        Return history in the Gradio 6 message dict format expected by
-        gr.Chatbot so a restored session can seed the Gradio chat component.
+        Return history in the [[user, assistant], ...] tuples format expected
+        by gr.Chatbot (Gradio 5.x default) so a restored session can seed
+        the Gradio chat component.
 
         Returns:
-            List of role/content dicts.
+            List of [query, answer] pairs.
         """
-        pairs = []
-        for turn in self._history:
-            pairs.append({"role": "user", "content": turn.query})
-            pairs.append({"role": "assistant", "content": turn.answer})
-        return pairs
+        return [[turn.query, turn.answer] for turn in self._history]
 
     def get_last_n_queries(self, n: Optional[int] = None) -> list[str]:
         """
