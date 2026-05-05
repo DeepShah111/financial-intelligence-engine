@@ -21,7 +21,7 @@ jobs:
           mkdir hf_deploy
           cp -r src gradio_app.py app.py requirements.txt README.md notebooks .gitattributes hf_deploy/ 2>/dev/null || true
           cd hf_deploy
-          git init
+          git init -b main
           git config user.email "action@github.com"
           git config user.name "GitHub Action"
           git add .
