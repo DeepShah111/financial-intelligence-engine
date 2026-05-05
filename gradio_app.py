@@ -240,11 +240,11 @@ def _format_reasoning(sub_queries: list[str], docs: list[Document]) -> str:
 
 def chat(
     user_message:     str,
-    history:          list[dict],
+    history:          list,
     memory:           ConversationMemory,
     use_decomposition: bool,
     run_evaluation:   bool,
-) -> tuple[list[dict], ConversationMemory, str, str, str]:
+) -> tuple[list, ConversationMemory, str, str, str]:
     """
     Process one user turn through the full RAG pipeline.
 
@@ -268,10 +268,7 @@ def chat(
             "Click **⚙️ Initialize Pipeline** at the top of the page first."
         )
         return (
-            history + [
-                {"role": "user", "content": user_message},
-                {"role": "assistant", "content": warning},
-            ],
+            history + [[str(user_message), str(warning)]],
             memory,
             "",
             "",
@@ -310,10 +307,7 @@ def chat(
         # Store completed turn in memory (original question, not reformulated).
         memory.add_turn(user_message, final_answer)
 
-        updated_history = history + [
-            {"role": "user", "content": user_message},
-            {"role": "assistant", "content": final_answer},
-        ]
+        updated_history = history + [[str(user_message), str(final_answer)]]
         return updated_history, memory, sources_md, scores_md, reasoning_md
 
     except Exception as exc:
@@ -325,10 +319,7 @@ def chat(
             "If the error persists, wait 30 s and try again."
         )
         return (
-            history + [
-                {"role": "user", "content": user_message},
-                {"role": "assistant", "content": error_msg},
-            ],
+            history + [[str(user_message), str(error_msg)]],
             memory,
             "",
             "",
@@ -338,7 +329,7 @@ def chat(
 
 def clear_conversation(
     memory: ConversationMemory,
-) -> tuple[list[dict], ConversationMemory, str, str, str]:
+) -> tuple[list, ConversationMemory, str, str, str]:
     """Reset the chatbot panel and conversation memory."""
     memory.clear()
     return [], memory, "", "", ""
@@ -400,7 +391,6 @@ and optionally scores the response with an independent **LLM-as-a-Judge** in rea
             chatbot = gr.Chatbot(
                 label="Conversation",
                 height=480,
-                type="messages",
             )
 
             with gr.Row():
