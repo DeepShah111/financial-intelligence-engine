@@ -17,7 +17,14 @@ jobs:
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          git config --global user.email "action@github.com"
-          git config --global user.name "GitHub Action"
-          git remote add space https://deep123shah456:$HF_TOKEN@huggingface.co/spaces/deep123shah456/financial-intelligence-engine || true
+          # Create fresh repo with only code files — no binary history
+          mkdir hf_deploy
+          cp -r src gradio_app.py app.py requirements.txt README.md notebooks .gitattributes hf_deploy/ 2>/dev/null || true
+          cd hf_deploy
+          git init
+          git config user.email "action@github.com"
+          git config user.name "GitHub Action"
+          git add .
+          git commit -m "sync: deploy from GitHub"
+          git remote add space https://deep123shah456:$HF_TOKEN@huggingface.co/spaces/deep123shah456/financial-intelligence-engine
           git push space main --force
