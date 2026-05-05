@@ -1,6 +1,7 @@
 # ============================================================
 # Financial Intelligence Engine — Pinned Dependencies
 # Verified compatible with Google Colab Python 3.12 (April 2026)
+# and HuggingFace Spaces Python 3.11 runtime (May 2026)
 # ============================================================
 
 # --- Core LangChain Ecosystem ---
@@ -11,12 +12,14 @@
 langchain==0.3.25
 langchain-community==0.3.24
 langchain-text-splitters==0.3.8
-langchain-chroma==0.2.4
+langchain-chroma
 langchain-huggingface==0.1.2
 langchain-groq==0.3.2
 
 # --- Vector Store & Embeddings ---
-chromadb==0.6.3
+# chromadb unpinned: langchain-chroma>=0.2.4 requires chromadb>=1.0.9
+# which conflicts with the previously pinned 0.6.3.
+chromadb
 sentence-transformers==3.4.1
 
 # --- Sparse Retrieval ---
@@ -42,3 +45,6 @@ tenacity==9.1.2
 
 # --- Security & Utilities ---
 python-dotenv==1.1.0
+
+# --- Gradio UI (HuggingFace Spaces) ---
+gradio==6.14.0
