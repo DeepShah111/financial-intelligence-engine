@@ -13,18 +13,62 @@ jobs:
           fetch-depth: 0
           lfs: true
 
-      - name: Push to HuggingFace Space
+      - name: Install huggingface_hub
+        run: pip install huggingface_hub
+
+      - name: Push code files to HuggingFace Space
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          # Create fresh repo with only code files — no binary history
-          mkdir hf_deploy
-          cp -r src gradio_app.py app.py requirements.txt README.md notebooks .gitattributes hf_deploy/ 2>/dev/null || true
-          cd hf_deploy
-          git init -b main
-          git config user.email "action@github.com"
-          git config user.name "GitHub Action"
-          git add .
-          git commit -m "sync: deploy from GitHub"
-          git remote add space https://deep123shah456:$HF_TOKEN@huggingface.co/spaces/deep123shah456/financial-intelligence-engine
-          git push space main --force
+          python - << 'EOF'
+          import os
+          import glob
+          from huggingface_hub import HfApi
+
+          api = HfApi()
+          repo_id = "deep123shah456/financial-intelligence-engine"
+          token = os.environ["HF_TOKEN"]
+
+          # Only upload code files — PDFs live permanently on the Space
+          # and are NEVER touched by this workflow
+          upload_patterns = [
+              "app.py",
+              "gradio_app.py",
+              "requirements.txt",
+              "README.md",
+              ".gitattributes",
+          ]
+
+          # Add all files from these directories
+          upload_dirs = ["src", "notebooks", "assets/demos"]
+
+          files = []
+
+          # Individual files
+          for f in upload_patterns:
+              if os.path.exists(f):
+                  files.append(f)
+
+          # Directory files
+          for d in upload_dirs:
+              for filepath in glob.glob(f"{d}/**", recursive=True):
+                  if os.path.isfile(filepath):
+                      files.append(filepath)
+
+          print(f"Uploading {len(files)} files...")
+
+          for filepath in files:
+              try:
+                  api.upload_file(
+                      path_or_fileobj=filepath,
+                      path_in_repo=filepath,
+                      repo_id=repo_id,
+                      repo_type="space",
+                      token=token,
+                  )
+                  print(f"✅ {filepath}")
+              except Exception as e:
+                  print(f"❌ {filepath}: {e}")
+
+          print("Sync complete.")
+          EOF
