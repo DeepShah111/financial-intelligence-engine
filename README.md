@@ -1,15 +1,3 @@
----
-title: Financial Intelligence Engine
-emoji: 📊
-colorFrom: blue
-colorTo: indigo
-sdk: gradio
-sdk_version: "5.15.0"
-python_version: "3.11"
-app_file: app.py
-pinned: false
----
-
 # Financial Intelligence Engine (Enterprise RAG)
 
 <p align="left">
@@ -20,7 +8,7 @@ pinned: false
   <img src="https://img.shields.io/badge/Relevance-0.955-brightgreen?style=flat-square"/>
   <img src="https://img.shields.io/badge/Correctness-0.812-brightgreen?style=flat-square"/>
   <img src="https://img.shields.io/badge/Status-Production--Ready-red?style=flat-square"/>
-  <a href="https://huggingface.co/spaces/your-username/financial-intelligence-engine">
+  <a href="https://huggingface.co/spaces/deep123shah456/financial-intelligence-engine">
     <img src="https://img.shields.io/badge/%F0%9F%A4%97%20HuggingFace-Live%20Demo-orange?style=flat-square"/>
   </a>
 </p>
@@ -41,6 +29,16 @@ pinned: false
 7. [Quickstart](#7-quickstart)
 8. [Dataset](#8-dataset)
 9. [Interactive Demo](#9-interactive-demo)
+
+---
+
+## 🚀 Live Demo
+
+**Try it now — no setup required:**
+
+[![🤗 Open in HuggingFace Spaces](https://huggingface.co/datasets/huggingface/badges/resolve/main/open-in-hf-spaces-xl.svg)](https://huggingface.co/spaces/deep123shah456/financial-intelligence-engine)
+
+> The full RAG pipeline runs live on HuggingFace Spaces. Ask any question about the Google, Meta, or Microsoft 10-K filings and get a fully cited, hallucination-checked answer in seconds.
 
 ---
 
@@ -380,7 +378,13 @@ financial-intelligence-engine/
 │
 ├── assets/                          # README image assets
 │   ├── batch_eval_primary.png
-│   └── telemetry_dashboard.png
+│   ├── telemetry_dashboard.png
+│   └── demos/                       # Live demo screenshots
+│       ├── demo_01_pipeline_ready.png
+│       ├── demo_02_cited_answer_sources.png
+│       ├── demo_03_reasoning_chain.png
+│       ├── demo_04_evaluation_scores.png
+│       └── demo_05_conversation_memory.png
 │
 ├── data/
 │   └── raw_pdfs/                    # SEC 10-K filings (Git-ignored)
@@ -407,7 +411,8 @@ financial-intelligence-engine/
 ├── .gitignore
 ├── README.md
 ├── requirements.txt                 # Core RAG dependencies, pinned
-└── requirements_spaces.txt          # Core deps + gradio==4.44.1 for HF Spaces
+├── requirements.txt                 # All dependencies including Gradio
+└── .github/workflows/main.yml      # GitHub Actions auto-sync to HuggingFace
 ```
 
 ---
@@ -473,8 +478,8 @@ jupyter notebook notebooks/main_execution.ipynb
 ### Option C — Gradio Demo (Local)
 
 ```bash
-# Install core + Gradio deps
-pip install -r requirements_spaces.txt
+# Install all deps
+pip install -r requirements.txt
 
 # Add credentials
 echo "GROQ_API_KEY=your_key_here" > .env
@@ -540,47 +545,65 @@ All figures extracted programmatically from source PDFs using `pypdf`. Values ve
 
 ## 9. Interactive Demo
 
-### Live on HuggingFace Spaces
+### 🔗 Live Application
 
-[![🤗 Open in Spaces](https://huggingface.co/datasets/huggingface/badges/resolve/main/open-in-hf-spaces-xl.svg)](https://huggingface.co/spaces/your-username/financial-intelligence-engine)
+[![🤗 Open in HuggingFace Spaces](https://huggingface.co/datasets/huggingface/badges/resolve/main/open-in-hf-spaces-xl.svg)](https://huggingface.co/spaces/deep123shah456/financial-intelligence-engine)
 
-> **Replace** `your-username` in the badge URL above with your actual HuggingFace username after deployment.
+**Direct link:** `https://huggingface.co/spaces/deep123shah456/financial-intelligence-engine`
+
+No API key needed. No setup. Click and ask.
+
+---
+
+### Demo Screenshots
+
+#### 1. Pipeline Initialized — Live on HuggingFace Spaces
+![Pipeline Ready](assets/demos/demo_01_pipeline_ready.png)
+
+*The full RAG pipeline initializes on HuggingFace Spaces free tier CPU. Warm start (subsequent loads) completes in under 30 seconds as ChromaDB and BM25 indexes are cached to disk. The architecture summary at the bottom shows the full technical stack visible to any recruiter who scrolls.*
+
+---
+
+#### 2. Cited Answer with Retrieved Sources
+![Cited Answer with Sources](assets/demos/demo_02_cited_answer_sources.png)
+
+*Every claim in the answer is immediately followed by its source citation (`[Source: Meta 10-K]`). The right panel shows the exact retrieved chunks with company label and page number — a recruiter can verify any figure directly against the source filing. This is the compliance auditor (Stage 2) working: zero ungrounded claims.*
+
+---
+
+#### 3. Query Decomposition Reasoning Chain
+![Query Decomposition](assets/demos/demo_03_reasoning_chain.png)
+
+*For a complex multi-company question, the system automatically decomposes it into 3 focused sub-queries — each retrieved independently. The Reasoning Chain panel shows 13 unique chunks merged across Google (4), Meta (5), and Microsoft (4) — perfectly balanced by the custom RRF company filter. SHA-256 deduplication, synthesis, and compliance audit all happen before the final answer is shown.*
+
+---
+
+#### 4. Real-Time Evaluation Scores — Faithfulness 1.000 · Relevance 1.000
+![Evaluation Scores](assets/demos/demo_04_evaluation_scores.png)
+
+*After every answer, Qwen3-32B (a completely different model family from the Llama-3.3-70B generator) independently scores the response. Faithfulness 1.000 means every claim is grounded in the retrieved context — no hallucinations. Relevance 1.000 means the answer fully addresses the question. The judge model is intentionally from a different architecture family to prevent circular self-evaluation bias.*
+
+---
+
+#### 5. Conversation Memory — Follow-Up Questions
+![Conversation Memory](assets/demos/demo_05_conversation_memory.png)
+
+*Turn 1 asks about Google's revenues. Turn 2 asks "How does that compare to Meta's performance?" — without repeating "Google." The ConversationMemory module detects the implicit reference, reformulates the retrieval query with prior context, and returns a cross-company comparative answer. The sources panel confirms chunks from both Google and Meta 10-Ks were retrieved for the follow-up.*
+
+---
 
 ### Demo Features
 
 | Feature | Description |
 |---|---|
-| **Multi-turn Chat** | Full conversation with rolling 3-turn memory. Follow-up questions ("What about their R&D?") are automatically contextualised. |
-| **Source Panel** | Every answer shows the exact retrieved chunks with company label and page number. |
-| **Real-time Scores** | Toggle Faithfulness + Relevance evaluation via Qwen3-32B judge — rendered as a colour-coded score bar. |
-| **Query Decomposition** | Toggle to split complex multi-company / multi-metric questions into focused sub-queries. A Reasoning Chain tab shows how the query was decomposed and which companies contributed chunks. |
-| **Example Questions** | Six one-click buttons covering factual, comparative, and qualitative query types. |
-
-### Deploying to HuggingFace Spaces
-
-```bash
-# 1. Create a new Space at huggingface.co/new-space
-#    Runtime: Python 3.11  |  Hardware: CPU Basic (free tier)
-
-# 2. Push your repo
-git remote add spaces https://huggingface.co/spaces/your-username/financial-intelligence-engine
-git push spaces main
-
-# 3. Set your API key as a Repository Secret
-#    Space Settings → Repository Secrets → Add Secret
-#    Name:  GROQ_API_KEY
-#    Value: your_groq_api_key_here
-
-# 4. Set the requirements file
-#    Space Settings → Files → App file: gradio_app.py
-#                  → Requirements: requirements_spaces.txt
-```
-
-> **PDF Note:** The 10-K PDFs are Git-ignored. On Spaces, either commit them to the repo directly or use Hugging Face Datasets as a remote data source and adjust `DATA_DIR` in `config.py`.
+| **Multi-turn Chat** | Rolling 3-turn conversation memory. Follow-up questions are automatically contextualised. |
+| **Retrieved Sources** | Every answer shows exact chunks with company label and page number. |
+| **Real-time Scores** | Qwen3-32B judges Faithfulness + Relevance after each answer. |
+| **Query Decomposition** | Complex questions split into focused sub-queries, retrieved independently, then synthesised. |
+| **Reasoning Chain** | Full transparency into sub-queries, chunk counts, and company balance. |
+| **6 Example Questions** | One-click buttons covering factual, comparative, and qualitative query types. |
 
 ### Conversation Example
-
-Below is a representative multi-turn session showing how the conversation memory contextualises follow-up questions:
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────┐
@@ -588,35 +611,28 @@ Below is a representative multi-turn session showing how the conversation memory
 │  User:  What were Google's total R&D expenses in FY2025?                 │
 │                                                                          │
 │  Agent: Google reported total R&D expenses of $61.087 billion for       │
-│         FY2025, representing a year-over-year increase from $49.1B in   │
-│         FY2024 [Source: Google 10-K]. This reflects continued           │
-│         investment in AI infrastructure and core search capabilities.   │
+│         FY2025 [Source: Google 10-K].                                   │
 │                                                                          │
 │  Scores: Faithfulness 🟢 1.000  ·  Relevance 🟢 1.000                  │
 ├──────────────────────────────────────────────────────────────────────────┤
 │  Turn 2  (follow-up detected → query reformulated with Turn 1 context)  │
-│  User:  What about their capital expenditure?                            │
+│  User:  How does that compare to Meta's performance in the same year?   │
 │                                                                          │
-│  Agent: Google's capital expenditures for FY2025 were $91.4 billion     │
-│         [Source: Google 10-K], a significant step-up that the company   │
-│         attributed to data centre expansion and AI compute buildout.    │
-│         This compares to R&D spend of $61.087B in the same period.      │
+│  Agent: [Full cross-company comparative analysis — Google vs Meta       │
+│          R&D, revenue, and operating income with per-source citations]  │
 │                                                                          │
-│  Scores: Faithfulness 🟢 0.920  ·  Relevance 🟢 0.980                  │
+│  Scores: Faithfulness 🟢 1.000  ·  Relevance 🟢 1.000                  │
 ├──────────────────────────────────────────────────────────────────────────┤
 │  Turn 3  (query decomposition enabled)                                  │
-│  User:  Compare all three companies' capex and R&D                      │
+│  User:  Compare all three companies' R&D, net income and capex          │
 │                                                                          │
-│  🔍 Decomposed into 4 sub-queries:                                      │
-│     1. What were Google's capital expenditures and R&D expenses?        │
-│     2. What were Meta's capital expenditures and R&D expenses?          │
-│     3. What were Microsoft's capital expenditures and R&D expenses?     │
-│     4. How do capex-to-revenue ratios compare across the three?         │
+│  🔍 Decomposed into 3 sub-queries — retrieved independently:            │
+│     1. Google's R&D, net income, and capital expenditures FY2025        │
+│     2. Meta's R&D, net income, and capital expenditures FY2025          │
+│     3. Microsoft's R&D, net income, and capital expenditures FY2025     │
 │                                                                          │
-│  Agent: [Synthesised comparative analysis across all three companies    │
-│          with per-source citations and data from 9 retrieved chunks]    │
-│                                                                          │
-│  Scores: Faithfulness 🟢 0.880  ·  Relevance 🟢 0.960                  │
+│  Merged retrieval: 13 unique chunks (SHA-256 deduplicated)              │
+│  By company: Google 4 · Meta 5 · Microsoft 4                           │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
