@@ -1,20 +1,100 @@
+---
+title: Financial Intelligence Engine
+emoji: 📊
+colorFrom: blue
+colorTo: indigo
+sdk: gradio
+sdk_version: "5.15.0"
+python_version: "3.11"
+app_file: app.py
+pinned: false
+---
+
 # Financial Intelligence Engine (Enterprise RAG)
 
 <p align="left">
-  <img src="https://img.shields.io/badge/Python-3.9%2B-3776AB?style=flat-square&logo=python&logoColor=white"/>
+  <a href="https://huggingface.co/spaces/deep123shah456/financial-intelligence-engine" target="_blank">
+    <img src="https://img.shields.io/badge/🤗%20Live%20Demo-HuggingFace%20Spaces-FF9D00?style=for-the-badge&logo=huggingface&logoColor=white"/>
+  </a>
+  <a href="https://github.com/DeepShah111/financial-intelligence-engine" target="_blank">
+    <img src="https://img.shields.io/badge/GitHub-Repository-181717?style=for-the-badge&logo=github&logoColor=white"/>
+  </a>
+</p>
+
+<p align="left">
+  <img src="https://img.shields.io/badge/Python-3.11-3776AB?style=flat-square&logo=python&logoColor=white"/>
   <img src="https://img.shields.io/badge/Framework-LangChain-green?style=flat-square"/>
   <img src="https://img.shields.io/badge/LLM-Llama--3.3--70B-purple?style=flat-square"/>
   <img src="https://img.shields.io/badge/Faithfulness-0.864-brightgreen?style=flat-square"/>
   <img src="https://img.shields.io/badge/Relevance-0.955-brightgreen?style=flat-square"/>
   <img src="https://img.shields.io/badge/Correctness-0.812-brightgreen?style=flat-square"/>
   <img src="https://img.shields.io/badge/Status-Production--Ready-red?style=flat-square"/>
-  <a href="https://huggingface.co/spaces/deep123shah456/financial-intelligence-engine">
-    <img src="https://img.shields.io/badge/%F0%9F%A4%97%20HuggingFace-Live%20Demo-orange?style=flat-square"/>
-  </a>
 </p>
 
 > An enterprise-grade Agentic RAG system for SEC 10-K financial analysis.  
 > Eliminating AI hallucinations through Dual-LLM guardrails, Custom Rank Fusion, and statistically validated evaluation against verified ground truth.
+
+---
+
+## 🚀 Live Demo
+
+**Try it now — no setup, no API key required:**
+
+👉 **[https://huggingface.co/spaces/deep123shah456/financial-intelligence-engine](https://huggingface.co/spaces/deep123shah456/financial-intelligence-engine)**
+
+The live application allows you to:
+- Ask any question about the Google, Meta, or Microsoft 10-K filings and get a fully cited, hallucination-checked answer
+- See the exact retrieved source chunks with company label and page number
+- Enable Query Decomposition to split complex multi-company questions into focused sub-queries
+- Toggle real-time Faithfulness + Relevance scoring via an independent Qwen3-32B judge model
+- Ask follow-up questions — the conversation memory module automatically contextualises prior turns
+
+---
+
+## 📸 Demo Screenshots
+
+#### Pipeline Initialized — Live on HuggingFace Spaces
+<p align="center">
+  <img src="assets/demos/demo_01_pipeline_ready.png" alt="Pipeline Ready" width="100%"/>
+</p>
+
+*The full RAG pipeline running live on HuggingFace Spaces free-tier CPU. The architecture summary at the bottom shows the complete technical stack — Hybrid Dense + BM25 → Custom RRF → Llama-3.3-70B CoT → Qwen3-32B Judge — visible to any recruiter who scrolls.*
+
+---
+
+#### Cited Answer with Retrieved Sources
+<p align="center">
+  <img src="assets/demos/demo_02_cited_answer_sources.png" alt="Cited Answer with Sources" width="100%"/>
+</p>
+
+*Every claim in the answer is immediately followed by its source citation (`[Source: Meta 10-K]`). The right panel shows the exact retrieved chunks with company label and page number. This is the compliance auditor (Stage 2) working — zero ungrounded claims reach the user.*
+
+---
+
+#### Query Decomposition Reasoning Chain
+<p align="center">
+  <img src="assets/demos/demo_03_reasoning_chain.png" alt="Query Decomposition Reasoning Chain" width="100%"/>
+</p>
+
+*For a complex multi-company question, the system automatically decomposes it into 3 focused sub-queries — each retrieved independently. The Reasoning Chain panel shows 13 unique chunks merged across Google (4), Meta (5), and Microsoft (4) — perfectly balanced by the custom RRF company filter. SHA-256 deduplication, synthesis, and compliance audit all happen before the final answer is shown.*
+
+---
+
+#### Real-Time Evaluation Scores — Faithfulness 1.000 · Relevance 1.000
+<p align="center">
+  <img src="assets/demos/demo_04_evaluation_scores.png" alt="Real-Time Evaluation Scores" width="100%"/>
+</p>
+
+*After every answer, Qwen3-32B — a completely different model family from the Llama-3.3-70B generator — independently scores the response. Faithfulness 1.000 means every claim is grounded in the retrieved context. Relevance 1.000 means the answer fully addresses the question. Using a different model architecture as judge prevents circular self-evaluation bias.*
+
+---
+
+#### Conversation Memory — Follow-Up Questions
+<p align="center">
+  <img src="assets/demos/demo_05_conversation_memory.png" alt="Conversation Memory" width="100%"/>
+</p>
+
+*Turn 1 asks about Google's revenues. Turn 2 asks "How does that compare to Meta's performance?" — without mentioning Google. The ConversationMemory module detects the implicit reference, reformulates the retrieval query with prior context, and returns a cross-company comparative answer citing chunks from both Google and Meta 10-Ks.*
 
 ---
 
