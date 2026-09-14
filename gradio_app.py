@@ -532,10 +532,7 @@ and optionally scores the response with an independent **LLM-as-a-Judge** in rea
 
 # ── Entry Point ───────────────────────────────────────────────────────────────
 
+# Launched by app.py (Render sets the port). Kept for local standalone runs only.
 if __name__ == "__main__":
-    demo.queue()       # enables concurrency and progress events
-    demo.launch(
-        server_name="0.0.0.0",   # required for HuggingFace Spaces / Docker
-        server_port=7860,
-        share=False,             # set True for a temporary public link locally
-    )
+    demo.queue()
+    demo.launch(server_name="0.0.0.0", server_port=int(os.environ.get("PORT", 7860)))

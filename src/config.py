@@ -1,20 +1,8 @@
-"""
-Configuration settings for the Financial Intelligence Engine (RAG).
-
-UPGRADES vs previous version:
-- Removed import-time side effects (os.makedirs, logging.basicConfig no longer
-  run on import). This prevents test-suite pollution and multi-process conflicts.
-- setup_environment() must be called once explicitly at pipeline startup.
-- get_logger() is idempotent: safe to call from any module without duplicating handlers.
-- All path construction consolidated — no f-string path building scattered across modules.
-"""
-
 import os
 import logging
 from pathlib import Path
 
-# ── Directory Layout ──────────────────────────────────────────────────────────
-# Absolute paths via pathlib so os.chdir() in Colab never breaks resolution.
+# Directory Layout
 PROJECT_ROOT: Path = Path(__file__).resolve().parent.parent
 DATA_DIR: str      = str(PROJECT_ROOT / "data" / "raw_pdfs")
 ARTIFACTS_DIR: str = str(PROJECT_ROOT / "artifacts")
@@ -30,7 +18,7 @@ _ALL_DIRS: list[str] = [
     VISUALS_DIR,
 ]
 
-# ── RAG Hyperparameters ───────────────────────────────────────────────────────
+# RAG Hyperparameters
 CHUNK_SIZE: int    = 1200
 CHUNK_OVERLAP: int = 250
 TOP_K_VECTORS: int = 7
@@ -45,11 +33,12 @@ MAX_CHUNKS_PER_COMPANY: int = 3
 
 # Embedding model — BAAI/bge-small-en-v1.5 is a top-ranked open-source model
 # on the MTEB leaderboard; cost-free and production-grade.
-EMBEDDING_MODEL_NAME: str = "BAAI/bge-small-en-v1.5"
+# Embeddings now via Jina API (no local model); name kept for logging only.
+EMBEDDING_MODEL_NAME: str = "jina-embeddings-v3"
 
-# Generator & Evaluator model names (Groq-hosted)
-GENERATOR_MODEL: str  = "llama-3.3-70b-versatile"
-EVALUATOR_MODEL: str  = "qwen/qwen3-32b"
+# Generator & Evaluator model names (Groq-hosted, current Sept 2026)
+GENERATOR_MODEL: str  = "openai/gpt-oss-120b"
+EVALUATOR_MODEL: str  = "qwen/qwen3.6-27b"
                                                  
 
 # API call reliability
@@ -58,7 +47,7 @@ API_RETRY_MIN_WAIT: int    = 2   # seconds
 API_RETRY_MAX_WAIT: int    = 10  # seconds
 
 
-# ── Environment Setup ─────────────────────────────────────────────────────────
+# Environment Setup 
 def setup_environment() -> None:
     """
     Create all required artifact directories.
@@ -71,7 +60,7 @@ def setup_environment() -> None:
         os.makedirs(directory, exist_ok=True)
 
 
-# ── Logger Factory ────────────────────────────────────────────────────────────
+# Logger Factory 
 def get_logger(name: str = "financial_rag") -> logging.Logger:
     """
     Return a configured logger. Idempotent — safe to call multiple times.
@@ -118,7 +107,5 @@ def get_logger(name: str = "financial_rag") -> logging.Logger:
     return logger
 
 
-# ── Module-level logger ───────────────────────────────────────────────────────
-# Other modules import this directly:  from src.config import logger
-# It is created here so there is one canonical logger instance for the project.
+# Module-level logger 
 logger: logging.Logger = get_logger("financial_rag")

@@ -25,7 +25,7 @@ import shutil
 from typing import Optional
 
 from langchain_chroma import Chroma
-from langchain_huggingface import HuggingFaceEmbeddings
+from src.jina_embeddings import JinaEmbeddings
 from langchain_community.retrievers import BM25Retriever
 from langchain_core.documents import Document
 
@@ -191,12 +191,8 @@ class HybridRetrievalEngine:
         self.bm25_path: str     = os.path.join(VECTOR_DB_DIR, "bm25_index.pkl")
         self.bm25_hash_path: str = os.path.join(VECTOR_DB_DIR, "bm25_index.sha256")
 
-        logger.info("Loading embedding model: %s", EMBEDDING_MODEL_NAME)
-        self.embedding_model = HuggingFaceEmbeddings(
-            model_name=EMBEDDING_MODEL_NAME,
-            model_kwargs={"device": "cpu"},     # explicit; avoids silent GPU fallback
-            encode_kwargs={"normalize_embeddings": True},  # required for cosine similarity
-        )
+        logger.info("Using Jina API embeddings (no local model).")
+        self.embedding_model = JinaEmbeddings()
 
         self.ensemble_retriever: Optional[CustomHybridRetriever] = None
 

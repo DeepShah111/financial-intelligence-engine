@@ -1,6 +1,7 @@
-# Entry point for HuggingFace Spaces
-# Spaces expects app.py — this simply imports and runs gradio_app.py
+# Entry point for Render: import the Gradio app and bind to Render's port.
+import os
 from gradio_app import demo
 
-demo.queue()
-demo.launch()
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 7860))
+    demo.launch(server_name="0.0.0.0", server_port=port)
