@@ -1,6 +1,6 @@
 """
 Gradio Interactive Demo — Financial Intelligence Engine.
-Deploy-ready for Render (Jina embeddings, Groq LLM).
+Built for Gradio 4.44.1. Deploys on Render (Jina embeddings, Groq LLM).
 """
 
 from __future__ import annotations
@@ -41,7 +41,7 @@ EXAMPLE_QUESTIONS: list[str] = [
 ]
 
 
-# ── Global State (module-level — no gr.State, which crashes Gradio's schema) ───
+# ── Global State (module-level; no gr.State) ──────────────────────────────────
 _agent:       Optional[FinancialGenerationAgent] = None
 _evaluator:   Optional[RAGEvaluator]             = None
 _initialized: bool                               = False
@@ -149,7 +149,7 @@ def _format_reasoning(sub_queries: list[str], docs: list[Document]) -> str:
     return "\n\n".join(lines)
 
 
-# ── Main Chat Handler (uses module-level _memory; messages format) ────────────
+# ── Main Chat Handler (tuple history format for Gradio 4.x) ───────────────────
 def chat(user_message, history, use_decomposition, run_evaluation):
     history = history or []
     if not user_message.strip():
@@ -157,9 +157,7 @@ def chat(user_message, history, use_decomposition, run_evaluation):
 
     if not _initialized:
         warning = "Pipeline not initialized. Click 'Initialize Pipeline' at the top first."
-        history = history + [{"role": "user", "content": user_message},
-                             {"role": "assistant", "content": warning}]
-        return history, "", "", ""
+        return history + [[user_message, warning]], "", "", ""
 
     retrieval_query = _memory.reformulate_query(user_message)
     sources_md = scores_md = reasoning_md = ""
@@ -179,18 +177,14 @@ def chat(user_message, history, use_decomposition, run_evaluation):
             scores_md = _format_scores(scores)
 
         _memory.add_turn(user_message, final_answer)
-        history = history + [{"role": "user", "content": user_message},
-                             {"role": "assistant", "content": final_answer}]
-        return history, sources_md, scores_md, reasoning_md
+        return history + [[user_message, final_answer]], sources_md, scores_md, reasoning_md
 
     except Exception as exc:
         logger.error("[Gradio] Generation error: %s", exc)
         error_msg = (f"An error occurred during generation: `{exc}`. "
                      "This may be a rate-limit or network issue; the pipeline retries "
                      "automatically. If it persists, wait 30s and try again.")
-        history = history + [{"role": "user", "content": user_message},
-                             {"role": "assistant", "content": error_msg}]
-        return history, "", "", ""
+        return history + [[user_message, error_msg]], "", "", ""
 
 
 def clear_conversation():
@@ -206,7 +200,7 @@ _CUSTOM_CSS = """
 .example-btn { font-size: 0.80em !important; padding: 4px 8px !important; }
 """
 
-with gr.Blocks(title="Financial Intelligence Engine") as demo:
+with gr.Blocks(title="Financial Intelligence Engine", css=_CUSTOM_CSS) as demo:
 
     gr.Markdown("""
 # Financial Intelligence Engine
@@ -232,7 +226,7 @@ scores the response with an independent **LLM-as-a-Judge** in real time.
 
     with gr.Row(equal_height=False):
         with gr.Column(scale=3, min_width=400):
-            chatbot = gr.Chatbot(label="Conversation", height=480, type="messages")
+            chatbot = gr.Chatbot(label="Conversation", height=480)
 
             with gr.Row():
                 msg_input = gr.Textbox(
@@ -321,4 +315,4 @@ Corpus: Google, Meta, Microsoft 10-K filings — 1,617 annotated chunks.
 
 if __name__ == "__main__":
     demo.queue()
-    demo.launch(server_name="0.0.0.0", server_port=int(os.environ.get("PORT", 7860)), show_api=False)
+    demo.launch(server_name="0.0.0.0", server_port=int(os.environ.get("PORT", 7860)))

@@ -15,4 +15,4 @@ numpy
 tenacity
 python-dotenv
 requests
-gradio==5.9.1
+gradio==4.44.1
