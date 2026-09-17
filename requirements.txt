@@ -16,3 +16,4 @@ tenacity==9.1.2
 python-dotenv==1.1.0
 requests
 gradio==4.44.1
+huggingface_hub==0.25.2
