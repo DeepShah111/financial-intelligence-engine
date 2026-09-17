@@ -6,8 +6,9 @@ __pycache__/
 *.pyc
 .ipynb_checkpoints/
 
-# Project Artifacts & Databases (rebuilt on Spaces from PDFs)
-artifacts/
+artifacts/*
+!artifacts/vector_db/
+!artifacts/vector_db/**
 
 # OS generated files
 .DS_Store
