@@ -16,3 +16,4 @@ tenacity
 python-dotenv
 requests
 gradio==5.9.1
+gradio-client==1.5.2
