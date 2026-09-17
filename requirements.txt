@@ -1,9 +1,9 @@
 langchain==0.3.25
 langchain-community==0.3.24
 langchain-text-splitters==0.3.8
-langchain-chroma==0.2.4
+langchain-chroma
 langchain-groq==0.3.2
-chromadb==0.6.3
+chromadb
 rank_bm25==0.2.2
 pypdf==5.4.0
 groq==0.23.1
