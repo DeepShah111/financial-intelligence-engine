@@ -23,6 +23,7 @@ NEW — Query Decomposition (generate_answer_decomposed):
 """
 
 import json
+import re
 
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.documents import Document
@@ -162,8 +163,62 @@ Source Context:
 
 Draft Answer:
 {draft}"""),
-            ("human", "Audit this draft. Output ONLY the finalized, hallucination-free <final_answer> text. Do not include the <thought_process>."),
+            ("human", "Audit this draft. Output ONLY the finalized, hallucination-free <final_answer> text. Do not include the <thought_process>. If the draft is already fully supported by the context, output it unchanged. Never reply with an empty message."),
         ])
+
+    # ── Internal: Empty-Response Guard ───────────────────────────────────────
+    @staticmethod
+    def _require_text(text: str, stage: str) -> str:
+        """
+        Raise an error when the model returns an empty response.
+
+        Reasoning models can occasionally return an empty string with no error.
+        Raising here lets the retry decorator on the calling method try again
+        (up to MAX_API_RETRIES). If every attempt is empty, the error reaches
+        the chat handler, which shows a readable message and does NOT save an
+        empty answer to the conversation memory.
+        """
+        if not text or not text.strip():
+            raise ValueError(f"The {stage} returned an empty response.")
+        return text
+
+    @staticmethod
+    def _extract_final_answer(draft: str) -> str:
+        """
+        Return only the <final_answer> part of a draft (no <thought_process>).
+
+        Used when the auditor returns nothing. Handles a draft with both tags,
+        only an opening tag, or no tags at all (the decomposition path).
+        """
+        match = re.search(r"<final_answer>(.*?)</final_answer>", draft, re.DOTALL)
+        if match:
+            return match.group(1).strip()
+        if "<final_answer>" in draft:
+            return draft.split("<final_answer>", 1)[1].strip()
+        return re.sub(
+            r"<thought_process>.*?</thought_process>", "", draft, flags=re.DOTALL
+        ).strip()
+
+    def _resolve_audit(self, audited: str, draft: str) -> str:
+        """
+        Return the audited answer, or the draft's final answer if the auditor
+        returned nothing.
+
+        Reasoning models sometimes decide in their hidden reasoning that the
+        draft needs no changes, and then write no text at all. Retrying gives
+        the same empty result, so we use the draft instead and log a warning.
+        If the draft itself has no usable text, raise an error.
+        """
+        if audited and audited.strip():
+            return audited
+        fallback = self._extract_final_answer(draft)
+        if not fallback:
+            raise ValueError("The auditor and the draft both returned no text.")
+        logger.warning(
+            "Auditor returned no text (it found nothing to change). "
+            "Using the generator's final answer instead."
+        )
+        return fallback
 
     # ── Internal: Retryable LLM Calls ────────────────────────────────────────
     @_llm_retry
@@ -179,7 +234,8 @@ Draft Answer:
             Raw LLM response string including <thought_process> and <final_answer>.
         """
         chain = self.qa_prompt | self.llm
-        return chain.invoke({"context": context, "question": question}).content
+        text = chain.invoke({"context": context, "question": question}).content
+        return self._require_text(text, "generator")
 
     @_llm_retry
     def _invoke_auditor(self, context: str, question: str, draft: str) -> str:
@@ -195,11 +251,12 @@ Draft Answer:
             Final hallucination-free <final_answer> text.
         """
         chain = self.critic_prompt | self.llm
-        return chain.invoke({
+        text = chain.invoke({
             "context":  context,
             "draft":    draft,
             "question": question,
         }).content
+        return text   # may be empty; generate_answer falls back to the draft
 
     # ── Public: Full Answer Generation ───────────────────────────────────────
     def generate_answer(self, query: str) -> tuple[str, list[Document]]:
@@ -233,7 +290,9 @@ Draft Answer:
         draft_response: str = self._invoke_generator(context, query)
 
         logger.info("Step 2: Running Strict Compliance Audit (%s)...", GENERATOR_MODEL)
-        final_response: str = self._invoke_auditor(context, query, draft_response)
+        final_response: str = self._resolve_audit(
+            self._invoke_auditor(context, query, draft_response), draft_response
+        )
 
         return final_response, docs
 
@@ -301,11 +360,12 @@ Draft Answer:
             f"  {i}. {q}" for i, q in enumerate(sub_queries, 1)
         )
         chain = _SYNTHESIS_PROMPT | self.llm
-        return chain.invoke({
+        text = chain.invoke({
             "sub_queries_formatted": sub_queries_formatted,
             "context":               context,
             "question":              question,
         }).content
+        return self._require_text(text, "synthesizer")
 
     # ── Public: Decomposed Answer Generation ─────────────────────────────────
     def generate_answer_decomposed(
@@ -382,8 +442,9 @@ Draft Answer:
         logger.info(
             "[Decomposition] Running compliance audit on synthesised answer..."
         )
-        final_response: str = self._invoke_auditor(
-            merged_context, query, synthesised_draft
+        final_response: str = self._resolve_audit(
+            self._invoke_auditor(merged_context, query, synthesised_draft),
+            synthesised_draft,
         )
 
         return final_response, all_docs, sub_queries

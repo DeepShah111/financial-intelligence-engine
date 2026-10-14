@@ -18,6 +18,7 @@ Design decisions:
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Optional
 
@@ -52,6 +53,17 @@ _FOLLOW_UP_SIGNALS: frozenset[str] = frozenset({
     "tell me more", "elaborate", "expand on",
     "what about the", "versus", "vs",
 })
+
+# Whole-word matcher for the signals above. A plain substring test wrongly
+# fired on words that merely CONTAIN a signal ("it" inside "capital", "profit",
+# "item"; "vs" inside other words), turning ordinary questions into follow-ups.
+# \b makes every signal match only as a complete word or phrase. Longer phrases
+# are listed first so "what about the" is tried before "what about".
+_FOLLOW_UP_PATTERN: re.Pattern = re.compile(
+    r"\b(?:"
+    + "|".join(re.escape(sig) for sig in sorted(_FOLLOW_UP_SIGNALS, key=len, reverse=True))
+    + r")\b"
+)
 
 
 class ConversationMemory:
@@ -133,9 +145,7 @@ class ConversationMemory:
             return current_query
 
         lowered: str = current_query.lower()
-        is_follow_up: bool = any(
-            signal in lowered for signal in _FOLLOW_UP_SIGNALS
-        )
+        is_follow_up: bool = _FOLLOW_UP_PATTERN.search(lowered) is not None
 
         if not is_follow_up:
             return current_query

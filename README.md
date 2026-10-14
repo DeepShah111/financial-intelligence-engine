@@ -126,6 +126,12 @@ The live application allows you to:
 
 Financial analysis requires absolute precision. Standard Generative AI models hallucinate numbers, lose context in long documents, and fail to synthesize comparative data when parsing dense regulatory filings like SEC 10-Ks.
 
+### Data note
+The corpus is three 10-K filings. Microsoft's filing covers the fiscal year ended
+June 30, 2024, one year earlier than the Google and Meta filings. Cross-company
+comparison answers may therefore span different periods; the answers cite the
+company filing they come from.
+
 The three failure modes that make off-the-shelf LLMs unusable for financial work:
 
 | Failure Mode | What Happens | Business Consequence |

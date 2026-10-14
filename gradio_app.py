@@ -41,11 +41,13 @@ EXAMPLE_QUESTIONS: list[str] = [
 ]
 
 
-# ── Global State (module-level; no gr.State) ──────────────────────────────────
+# ── Global State (module-level) ───────────────────────────────────────────────
+# The agent and evaluator hold no per-user data, so one shared copy is safe.
+# Conversation memory is NOT here any more: it lives in a per-session gr.State,
+# so each visitor gets their own history (see chat() and the UI wiring below).
 _agent:       Optional[FinancialGenerationAgent] = None
 _evaluator:   Optional[RAGEvaluator]             = None
 _initialized: bool                               = False
-_memory = ConversationMemory(max_turns=3)
 
 
 # ── Pipeline Initialisation ───────────────────────────────────────────────────
@@ -91,6 +93,10 @@ def _format_sources(docs: list[Document]) -> str:
     for i, doc in enumerate(docs, 1):
         company  = doc.metadata.get("company", "Unknown")
         page     = doc.metadata.get("page", "N/A")
+        # PyPDFLoader counts pages from 0, but a PDF viewer shows page 1 first.
+        # Add 1 so the number shown here matches the real page in the filing.
+        if isinstance(page, int):
+            page = page + 1
         src_file = doc.metadata.get("source_file", "")
         content  = doc.page_content[:600].strip()
         ellipsis = "…" if len(doc.page_content) > 600 else ""
@@ -150,16 +156,20 @@ def _format_reasoning(sub_queries: list[str], docs: list[Document]) -> str:
 
 
 # ── Main Chat Handler (tuple history format for Gradio 4.x) ───────────────────
-def chat(user_message, history, use_decomposition, run_evaluation):
+def chat(user_message, history, use_decomposition, run_evaluation, memory):
     history = history or []
+    # Per-session memory: gr.State starts as None for a new visitor.
+    if memory is None:
+        memory = ConversationMemory(max_turns=3)
+
     if not user_message.strip():
-        return history, "", "", ""
+        return history, "", "", "", memory
 
     if not _initialized:
         warning = "Pipeline not initialized. Click 'Initialize Pipeline' at the top first."
-        return history + [[user_message, warning]], "", "", ""
+        return history + [[user_message, warning]], "", "", "", memory
 
-    retrieval_query = _memory.reformulate_query(user_message)
+    retrieval_query = memory.reformulate_query(user_message)
     sources_md = scores_md = reasoning_md = ""
 
     try:
@@ -176,20 +186,21 @@ def chat(user_message, history, use_decomposition, run_evaluation):
                                          answer=final_answer, context_docs=docs)
             scores_md = _format_scores(scores)
 
-        _memory.add_turn(user_message, final_answer)
-        return history + [[user_message, final_answer]], sources_md, scores_md, reasoning_md
+        memory.add_turn(user_message, final_answer)
+        return history + [[user_message, final_answer]], sources_md, scores_md, reasoning_md, memory
 
     except Exception as exc:
         logger.error("[Gradio] Generation error: %s", exc)
         error_msg = (f"An error occurred during generation: `{exc}`. "
                      "This may be a rate-limit or network issue; the pipeline retries "
                      "automatically. If it persists, wait 30s and try again.")
-        return history + [[user_message, error_msg]], "", "", ""
+        return history + [[user_message, error_msg]], "", "", "", memory
 
 
-def clear_conversation():
-    _memory.clear()
-    return [], "", "", ""
+def clear_conversation(memory):
+    if memory is not None:
+        memory.clear()
+    return [], "", "", "", memory
 
 
 # ── Gradio UI ─────────────────────────────────────────────────────────────────
@@ -223,6 +234,9 @@ scores the response with an independent **LLM-as-a-Judge** in real time.
     )
 
     gr.Markdown("---")
+
+    # Per-visitor conversation memory (None until the visitor's first message).
+    memory_state = gr.State(None)
 
     with gr.Row(equal_height=False):
         with gr.Column(scale=3, min_width=400):
@@ -296,21 +310,25 @@ automatically enriched with prior context before retrieval.
 <div class="app-footer">
 Hybrid Dense (ChromaDB) + BM25 → Custom RRF → Chain-of-Thought → independent Judge.
 Corpus: Google, Meta, Microsoft 10-K filings — 1,617 annotated chunks.
+<br>
+Data note: Microsoft's filing covers the fiscal year ended June 30, 2024 (one year earlier
+than the others), so comparisons across companies may span different periods.
 </div>
     """)
 
     # ── Event Wiring ──────────────────────────────────────────────────────────
     init_btn.click(fn=initialize_pipeline, outputs=init_status)
 
-    _inputs  = [msg_input, chatbot, use_decomp, run_eval]
-    _outputs = [chatbot, sources_display, scores_display, reasoning_display]
+    _inputs  = [msg_input, chatbot, use_decomp, run_eval, memory_state]
+    _outputs = [chatbot, sources_display, scores_display, reasoning_display, memory_state]
 
     submit_btn.click(fn=chat, inputs=_inputs, outputs=_outputs).then(
         fn=lambda: "", outputs=msg_input)
     msg_input.submit(fn=chat, inputs=_inputs, outputs=_outputs).then(
         fn=lambda: "", outputs=msg_input)
     clear_btn.click(fn=clear_conversation,
-                    outputs=[chatbot, sources_display, scores_display, reasoning_display])
+                    inputs=[memory_state],
+                    outputs=[chatbot, sources_display, scores_display, reasoning_display, memory_state])
 
 
 if __name__ == "__main__":

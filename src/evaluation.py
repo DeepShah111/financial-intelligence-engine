@@ -113,6 +113,11 @@ class RAGEvaluator:
             ("system", """You are an impartial AI quality auditor evaluating a Retrieval-Augmented Generation (RAG) system.
 Analyze the provided Question, Context, and Answer. Score the following metrics strictly and objectively.
 
+Scoring rules:
+- Financial tables in the Context usually give numbers in millions. An Answer figure that is the same number in other units or rounded (for example, $44,477 million written as $44.5 billion) IS supported by the Context.
+- A statement that something is not disclosed or not found in the provided excerpts is NOT an unsupported claim.
+- Score faithfulness by the share of claims that are supported. Do not give 0.0 unless most claims are invented or contradict the Context.
+
 1. 'faithfulness' (0.0–1.0): Is EVERY claim in the Answer directly supported by the Context?
    - 1.0: Every fact traces back to a specific passage in the Context.
    - 0.5: Most claims are grounded; one or two minor unsupported details.

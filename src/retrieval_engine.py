@@ -17,6 +17,7 @@ UPGRADES vs previous version:
 """
 
 import os
+import re
 import json
 import pickle
 import hashlib
@@ -37,6 +38,32 @@ from src.config import (
     MAX_CHUNKS_PER_COMPANY,
     EMBEDDING_MODEL_NAME,
 )
+
+# ── Query-time retrieval settings ─────────────────────────────────────────────
+# How many candidates each search hands to the fusion step (the final answer
+# still has TOP_K_VECTORS chunks). A larger pool lets a relevant chunk that is
+# ranked 8th or 15th by one search still take part in the fusion.
+CANDIDATE_POOL_K: int = 20
+# BM25 returns its top results across ALL companies, so it needs a deeper list
+# to still have enough chunks left after filtering for one company.
+SPARSE_POOL_K: int = 60
+
+# Words that identify a company in a question -> the label stored in the chunk
+# metadata (see data_ingestion.py). Matched as whole words, ignoring case.
+_COMPANY_ALIASES: dict[str, tuple[str, ...]] = {
+    "Google":    ("google", "alphabet"),
+    "Meta":      ("meta", "facebook"),
+    "Microsoft": ("microsoft",),
+}
+
+# Abbreviations written out before searching. The filings print "Research and
+# development" in full, so keyword search cannot match the short form "R&D".
+_ABBREVIATIONS: dict[str, str] = {
+    r"\bR&D\b": "research and development",
+    r"\b(?:capital expenditures?|capex)\b": (
+        "capital expenditures purchases of property and equipment"
+    ),
+}
 
 
 # ── Reciprocal Rank Fusion ────────────────────────────────────────────────────
@@ -148,18 +175,55 @@ class CustomHybridRetriever:
 
         return balanced
 
-    def invoke(self, query: str) -> list[Document]:
-        """
-        Execute hybrid search and return RRF-fused, company-balanced results.
+    # ── Query helpers (new) ───────────────────────────────────────────────────
+    @staticmethod
+    def _expand_query(query: str) -> str:
+        """Write out known abbreviations (for example R&D) for the searches."""
+        expanded = query
+        for pattern, full_text in _ABBREVIATIONS.items():
+            expanded = re.sub(pattern, full_text, expanded, flags=re.IGNORECASE)
+        if expanded != query:
+            logger.info("[Retrieval] Query expanded for search: '%s'", expanded)
+        return expanded
 
-        Args:
-            query: The user's natural language query string.
+    @staticmethod
+    def _detect_companies(query: str) -> list[str]:
+        """Return the company labels the question names, in a fixed order."""
+        lowered = query.lower()
+        found: list[str] = []
+        for label, aliases in _COMPANY_ALIASES.items():
+            if any(re.search(rf"\b{re.escape(a)}\b", lowered) for a in aliases):
+                found.append(label)
+        return found
 
-        Returns:
-            List of up to TOP_K_VECTORS Document objects ranked by fused score.
-        """
-        dense_docs:  list[Document] = self.dense_retriever.invoke(query)
-        sparse_docs: list[Document] = self.sparse_retriever.invoke(query)
+    def _dense_search(self, query: str, company: Optional[str]) -> list[Document]:
+        """Dense (meaning) search, optionally limited to one company."""
+        if company is None:
+            return self.dense_retriever.invoke(query)[:CANDIDATE_POOL_K]
+        vector_store = getattr(self.dense_retriever, "vectorstore", None)
+        if vector_store is not None:
+            return vector_store.similarity_search(
+                query, k=CANDIDATE_POOL_K, filter={"company": company}
+            )
+        # Retriever without a vector store attached: filter its results instead.
+        return [
+            d for d in self.dense_retriever.invoke(query)
+            if d.metadata.get("company") == company
+        ][:CANDIDATE_POOL_K]
+
+    def _sparse_search(self, query: str, company: Optional[str]) -> list[Document]:
+        """Keyword (BM25) search, optionally limited to one company."""
+        docs = self.sparse_retriever.invoke(query)
+        if company is not None:
+            docs = [d for d in docs if d.metadata.get("company") == company]
+        return docs[:CANDIDATE_POOL_K]
+
+    def _fuse(
+        self, query: str, company: Optional[str]
+    ) -> tuple[list[tuple[str, float]], dict]:
+        """Run both searches and return (chunks ranked by fused score, doc map)."""
+        dense_docs  = self._dense_search(query, company)
+        sparse_docs = self._sparse_search(query, company)
 
         rrf_scores: dict[str, float]    = {}
         doc_map:    dict[str, Document] = {}
@@ -170,7 +234,42 @@ class CustomHybridRetriever:
         sorted_docs: list[tuple[str, float]] = sorted(
             rrf_scores.items(), key=lambda x: x[1], reverse=True
         )
+        return sorted_docs, doc_map
 
+    def invoke(self, query: str) -> list[Document]:
+        """
+        Execute hybrid search and return RRF-fused results.
+
+        Behaviour:
+          - Known abbreviations such as R&D are written out for the searches.
+          - A question that names exactly ONE company is searched inside that
+            company only, and all TOP_K_VECTORS chunks come from it.
+          - Any other question (no company, or two or more) keeps the original
+            company-balanced behaviour.
+
+        Args:
+            query: The user's natural language query string.
+
+        Returns:
+            List of up to TOP_K_VECTORS Document objects ranked by fused score.
+        """
+        search_query = self._expand_query(query)
+        companies    = self._detect_companies(query)
+
+        if len(companies) == 1:
+            sorted_docs, doc_map = self._fuse(search_query, companies[0])
+            if len(sorted_docs) >= TOP_K_VECTORS:
+                logger.info(
+                    "[Retrieval] Single-company question: searched %s only.",
+                    companies[0],
+                )
+                return [doc_map[cid] for cid, _ in sorted_docs[:TOP_K_VECTORS]]
+            logger.info(
+                "[Retrieval] Too few %s chunks (%d); using balanced search.",
+                companies[0], len(sorted_docs),
+            )
+
+        sorted_docs, doc_map = self._fuse(search_query, None)
         return self._balance_by_company(sorted_docs, doc_map)
 
 
@@ -231,8 +330,12 @@ class HybridRetrievalEngine:
         file_hash = self._compute_file_sha256(tmp_path)
         shutil.move(tmp_path, self.bm25_path)   # atomic rename
 
-        with open(self.bm25_hash_path, "w") as hf:
+        # Write the hash the same way (temp file, then atomic replace), so a
+        # crash can never leave a half-written .sha256 file behind.
+        hash_tmp_path = self.bm25_hash_path + ".tmp"
+        with open(hash_tmp_path, "w") as hf:
             hf.write(file_hash)
+        os.replace(hash_tmp_path, self.bm25_hash_path)
 
         logger.info(
             "BM25 index serialized. SHA-256: %s", file_hash
@@ -270,6 +373,30 @@ class HybridRetrievalEngine:
         logger.info("BM25 index loaded and integrity verified.")
         return sparse_retriever
 
+    def _clear_partial_index(self) -> None:
+        """
+        Empty the vector_db folder before a cold build.
+
+        Only called when the index is NOT complete, so a healthy index is
+        never deleted. The folder itself is kept; only its contents go.
+        """
+        if not os.path.isdir(self.vector_db_dir):
+            return
+        leftovers = os.listdir(self.vector_db_dir)
+        if not leftovers:
+            return
+        logger.warning(
+            "Incomplete index found in %s (%d item(s)). Clearing it before "
+            "a clean rebuild to avoid duplicate chunks.",
+            self.vector_db_dir, len(leftovers),
+        )
+        for name in leftovers:
+            path = os.path.join(self.vector_db_dir, name)
+            if os.path.isdir(path) and not os.path.islink(path):
+                shutil.rmtree(path)
+            else:
+                os.remove(path)
+
     # ── Public: Build or Load Indexes ────────────────────────────────────────
     def build_indexes(
         self,
@@ -289,11 +416,17 @@ class HybridRetrievalEngine:
             ValueError:  If cold start is required but no chunks provided.
             RuntimeError: If BM25 integrity check fails on warm start.
         """
-        chroma_exists: bool = (
-            os.path.exists(self.vector_db_dir)
-            and len(os.listdir(self.vector_db_dir)) > 0
+        # An index is only "complete" when ALL THREE parts are present:
+        # the ChromaDB database, the BM25 pickle, and its SHA-256 sidecar.
+        # (The old check counted ANY file in the folder as ChromaDB, so a
+        # folder holding only the BM25 files looked like a finished index.)
+        chroma_exists: bool = os.path.exists(
+            os.path.join(self.vector_db_dir, "chroma.sqlite3")
         )
-        bm25_exists: bool = os.path.exists(self.bm25_path)
+        bm25_exists: bool = (
+            os.path.exists(self.bm25_path)
+            and os.path.exists(self.bm25_hash_path)
+        )
 
         if chroma_exists and bm25_exists:
             logger.info(
@@ -313,6 +446,12 @@ class HybridRetrievalEngine:
                     "Pass document_chunks=load_and_chunk_pdfs() for the initial build."
                 )
 
+            # A partly built index (for example a crash after ChromaDB was
+            # written but before BM25 was saved) must be cleared first.
+            # Otherwise Chroma.from_documents would ADD every chunk a second
+            # time to the existing database, creating duplicate chunks.
+            self._clear_partial_index()
+
             logger.info(
                 "[2/4] Cold start: Building Dense Vector Database (ChromaDB)..."
             )
@@ -329,8 +468,11 @@ class HybridRetrievalEngine:
             logger.info("[2/4] Serializing BM25 index with integrity hash...")
             self._write_bm25_with_integrity(sparse_retriever)
 
+        # Query-time pool sizes. These are set in memory only; the BM25 file on
+        # disk is not changed.
+        sparse_retriever.k = SPARSE_POOL_K
         dense_retriever = vector_store.as_retriever(
-            search_kwargs={"k": TOP_K_VECTORS}
+            search_kwargs={"k": CANDIDATE_POOL_K}
         )
 
         logger.info("[2/4] Initializing Reciprocal Rank Fusion engine...")

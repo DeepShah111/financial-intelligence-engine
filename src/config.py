@@ -38,7 +38,7 @@ EMBEDDING_MODEL_NAME: str = "jina-embeddings-v3"
 
 # Generator & Evaluator model names (Groq-hosted, current Sept 2026)
 GENERATOR_MODEL: str  = "openai/gpt-oss-120b"
-EVALUATOR_MODEL: str  = "qwen/qwen3.6-27b"
+EVALUATOR_MODEL: str = "qwen/qwen3.8-27b"
                                                  
 
 # API call reliability
