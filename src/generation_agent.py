@@ -183,6 +183,26 @@ Draft Answer:
         return text
 
     @staticmethod
+    def _describe_empty(message) -> str:
+        """
+        Short, safe description of an empty model reply, for logs and errors.
+
+        Shows why the text is empty (finish reason, output tokens, whether the
+        model wrote only hidden reasoning) so it can be diagnosed on a hosted
+        server where there is no console to experiment in.
+        """
+        meta = getattr(message, "response_metadata", None) or {}
+        extra = getattr(message, "additional_kwargs", None) or {}
+        usage = meta.get("token_usage") or {}
+        reasoning = extra.get("reasoning_content") or ""
+        return (
+            f"finish_reason={meta.get('finish_reason')}, "
+            f"output_tokens={usage.get('completion_tokens')}, "
+            f"reasoning_chars={len(reasoning)}, "
+            f"extra_keys={sorted(extra.keys())}"
+        )
+
+    @staticmethod
     def _extract_final_answer(draft: str) -> str:
         """
         Return only the <final_answer> part of a draft (no <thought_process>).
@@ -234,8 +254,15 @@ Draft Answer:
             Raw LLM response string including <thought_process> and <final_answer>.
         """
         chain = self.qa_prompt | self.llm
-        text = chain.invoke({"context": context, "question": question}).content
-        return self._require_text(text, "generator")
+        message = chain.invoke({"context": context, "question": question})
+        text = message.content
+        if not text or not text.strip():
+            detail = self._describe_empty(message)
+            logger.warning("Generator returned no text. %s", detail)
+            raise ValueError(
+                f"The generator returned an empty response. ({detail})"
+            )
+        return text
 
     @_llm_retry
     def _invoke_auditor(self, context: str, question: str, draft: str) -> str:
