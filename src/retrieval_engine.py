@@ -65,6 +65,13 @@ _ABBREVIATIONS: dict[str, str] = {
     ),
 }
 
+# Extra words ADDED AT THE END of the search text (the question itself is kept).
+# Testing on the real index showed that for "net income" this ranks the income
+# statement chunks far better than rewriting the question in place.
+_APPENDED_TERMS: dict[str, str] = {
+    r"\bnet income\b": "net income income statements",
+}
+
 
 # ── Reciprocal Rank Fusion ────────────────────────────────────────────────────
 class CustomHybridRetriever:
@@ -178,10 +185,13 @@ class CustomHybridRetriever:
     # ── Query helpers (new) ───────────────────────────────────────────────────
     @staticmethod
     def _expand_query(query: str) -> str:
-        """Write out known abbreviations (for example R&D) for the searches."""
+        """Write out known abbreviations (R&D, capex) and add helper words for the searches."""
         expanded = query
         for pattern, full_text in _ABBREVIATIONS.items():
             expanded = re.sub(pattern, full_text, expanded, flags=re.IGNORECASE)
+        for pattern, extra in _APPENDED_TERMS.items():
+            if re.search(pattern, query, flags=re.IGNORECASE):
+                expanded = f"{expanded} {extra}"
         if expanded != query:
             logger.info("[Retrieval] Query expanded for search: '%s'", expanded)
         return expanded
