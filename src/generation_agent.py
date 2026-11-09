@@ -436,7 +436,12 @@ Draft Answer:
                 "[Decomposition] Sub-query %d/%d retrieval: '%s'",
                 i, len(sub_queries), sub_query,
             )
-            docs: list[Document] = self.retriever.invoke(sub_query)
+            # A single sub-query means the decomposer only reworded the question,
+            # and its wording can hide the answer ("...each of the three
+            # companies in the most recent fiscal year?" lost Microsoft's capex
+            # line). In that case search with the user's own words.
+            search_text: str = query if len(sub_queries) == 1 else sub_query
+            docs: list[Document] = self.retriever.invoke(search_text)
             for doc in docs:
                 chunk_id: str = doc.metadata.get(
                     "chunk_id",

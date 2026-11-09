@@ -18,6 +18,7 @@ UPGRADES vs previous version:
 
 import os
 import re
+import math
 import json
 import pickle
 import hashlib
@@ -67,10 +68,19 @@ _ABBREVIATIONS: dict[str, str] = {
 
 # Extra words ADDED AT THE END of the search text (the question itself is kept).
 # Testing on the real index showed that for "net income" this ranks the income
-# statement chunks far better than rewriting the question in place.
+# statement chunks far better than rewriting the question in place. The same
+# test (diag12) showed that adding "earnings per share diluted" keeps the income
+# statement at rank 1-3 for every wording tried, and that "R&D" questions need
+# the words of the filing's own R&D table to rank it first.
 _APPENDED_TERMS: dict[str, str] = {
-    r"\bnet income\b": "net income income statements",
+    r"\bnet income\b": "net income income statements earnings per share diluted",
+    r"\b(?:R&D|research and development)\b": (
+        "expenses as a percentage of revenues table"
+    ),
 }
+
+# Curly quotes and double quotes (pasted questions often carry them).
+_QUOTE_CHARS = re.compile(r"[“”\"]")
 
 
 # ── Reciprocal Rank Fusion ────────────────────────────────────────────────────
@@ -184,8 +194,16 @@ class CustomHybridRetriever:
 
     # ── Query helpers (new) ───────────────────────────────────────────────────
     @staticmethod
+    def _clean_query(query: str) -> str:
+        """Remove pasted quote marks and curly apostrophes (they change the search results)."""
+        cleaned = query.replace("’", "'").replace("‘", "'")
+        cleaned = _QUOTE_CHARS.sub("", cleaned)
+        return re.sub(r"\s+", " ", cleaned).strip()
+
+    @staticmethod
     def _expand_query(query: str) -> str:
-        """Write out known abbreviations (R&D, capex) and add helper words for the searches."""
+        """Clean the question, write out known abbreviations (R&D, capex) and add helper words."""
+        query = CustomHybridRetriever._clean_query(query)
         expanded = query
         for pattern, full_text in _ABBREVIATIONS.items():
             expanded = re.sub(pattern, full_text, expanded, flags=re.IGNORECASE)
@@ -254,17 +272,47 @@ class CustomHybridRetriever:
           - Known abbreviations such as R&D are written out for the searches.
           - A question that names exactly ONE company is searched inside that
             company only, and all TOP_K_VECTORS chunks come from it.
-          - Any other question (no company, or two or more) keeps the original
-            company-balanced behaviour.
+          - A question that NAMES two or more companies is searched inside EACH
+            company separately, and every company gets its own share of the
+            slots (ceil(TOP_K / companies)), so one company cannot crowd another
+            out. (Tested on the real index: this fixed the Meta vs Microsoft net
+            income comparison.)
+          - A question that names no company, including "all three companies",
+            keeps the original company-balanced behaviour. (Tested: searching
+            each company separately was WORSE for the three-company capex
+            question, because Meta's and Microsoft's capex lines rank 3rd-7th
+            inside their own company.)
 
         Args:
             query: The user's natural language query string.
 
         Returns:
-            List of up to TOP_K_VECTORS Document objects ranked by fused score.
+            List of Document objects ranked by fused score (up to TOP_K_VECTORS
+            for one company; up to ceil(TOP_K / n) per company for several).
         """
         search_query = self._expand_query(query)
         companies    = self._detect_companies(query)
+
+        if len(companies) >= 2:
+            per_company = math.ceil(TOP_K_VECTORS / len(companies))
+            merged: list[Document] = []
+            seen: set[str] = set()
+            for company in companies:
+                sorted_docs, doc_map = self._fuse(search_query, company)
+                for cid, _ in sorted_docs[:per_company]:
+                    if cid not in seen:
+                        seen.add(cid)
+                        merged.append(doc_map[cid])
+            if len(merged) >= TOP_K_VECTORS:
+                logger.info(
+                    "[Retrieval] Multi-company question: searched %s separately, "
+                    "%d chunks each.", ", ".join(companies), per_company,
+                )
+                return merged
+            logger.info(
+                "[Retrieval] Too few chunks from the separate searches (%d); "
+                "using balanced search.", len(merged),
+            )
 
         if len(companies) == 1:
             sorted_docs, doc_map = self._fuse(search_query, companies[0])
