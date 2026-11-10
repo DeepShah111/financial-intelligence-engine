@@ -68,6 +68,13 @@ Rules:
 2. If the question is already atomic and focused (single fact, single company), return it unchanged as a 1-element array.
 3. Every sub-query must be fully self-contained (include the company name, metric name, and fiscal year if inferable from the original).
 4. You MUST respond with ONLY a valid JSON array of strings. No explanation, no preamble, no markdown code fences.
+5. The filings available are for exactly three companies: Google (Alphabet), Meta and Microsoft. "All three companies", "the three companies" and "each company" mean exactly these three. NEVER add any other company (such as Apple or Amazon) and NEVER invent a fiscal year; if the user names no year, write "most recent fiscal year".
+
+6. If the question refers to "all three companies" (or "each company") WITHOUT naming them, do not split it: return it unchanged as a 1-element array.
+
+Example — all three companies, not named:
+Input:  "Compare the capital expenditures of all three companies."
+Output: ["Compare the capital expenditures of all three companies."]
 
 Example — complex:
 Input:  "Compare Google and Meta's R&D spending and headcount trends"
@@ -91,6 +98,9 @@ Rules:
 - Cite the source immediately after every claim (e.g., [Source: Meta 10-K]).
 - If a sub-query returned no relevant data, explicitly state the filing does not provide that information.
 - Do NOT invent or infer any numbers absent from the context.
+- Financial tables are usually in millions. Before ranking or subtracting figures, put them in the same unit (for example, 44,477 million = $44.5 billion) and state the unit.
+- Describe a trend (increase, decrease, growth) only when the context contains the figures for BOTH years, and check that the direction matches the figures.
+- When comparing companies, name each company's fiscal year (Microsoft's ends on June 30).
 
 Sub-queries that were researched:
 {sub_queries_formatted}
@@ -142,6 +152,9 @@ Synthesize your findings into a professional, comparative analysis.
 - Use structured bullet points.
 - You MUST cite the source immediately after every claim (e.g., [Source: Meta 10-K]).
 - If data is missing (e.g., specific 2025 budgets), explicitly state that the filings do not provide forward-looking numbers for that year.
+- Financial tables are usually in millions. Before ranking or subtracting figures, put them in the same unit (for example, 44,477 million = $44.5 billion) and state the unit.
+- Describe a trend (increase, decrease, growth) only when the context contains the figures for BOTH years, and check that the direction matches the figures.
+- When comparing companies, name each company's fiscal year (Microsoft's ends on June 30).
 </final_answer>
 
 Context:
@@ -258,10 +271,22 @@ Draft Answer:
         text = message.content
         if not text or not text.strip():
             detail = self._describe_empty(message)
-            logger.warning("Generator returned no text. %s", detail)
-            raise ValueError(
-                f"The generator returned an empty response. ({detail})"
+            # At temperature 0 the same request tends to give the same empty
+            # reply every time, so a plain retry does not help. Try once with a
+            # little randomness before giving up.
+            logger.warning(
+                "Generator returned no text. %s. Retrying once at temperature 0.3.",
+                detail,
             )
+            warm_chain = self.qa_prompt | self.llm.bind(temperature=0.3)
+            message = warm_chain.invoke({"context": context, "question": question})
+            text = message.content
+            if not text or not text.strip():
+                detail = self._describe_empty(message)
+                logger.warning("Generator returned no text again. %s", detail)
+                raise ValueError(
+                    f"The generator returned an empty response. ({detail})"
+                )
         return text
 
     @_llm_retry
@@ -431,6 +456,13 @@ Draft Answer:
         # Retrieve context for each sub-query independently and merge.
         doc_map: dict[str, Document] = {}   # chunk_id → Document (deduplication)
 
+        # Groq's free tier rejects requests above about 8,000 tokens per minute
+        # (HTTP 413). Three or more sub-queries of 7 chunks each (21+ chunks)
+        # went over that limit, so with 3+ sub-queries each keeps its best few
+        # (5 each for 3 sub-queries, 4 each for 4): at most about 16 chunks.
+        n_sub: int = len(sub_queries)
+        chunks_per_sub_query: int = max(4, 15 // n_sub) if n_sub >= 3 else 0   # 0 = keep all
+
         for i, sub_query in enumerate(sub_queries, 1):
             logger.info(
                 "[Decomposition] Sub-query %d/%d retrieval: '%s'",
@@ -442,6 +474,8 @@ Draft Answer:
             # line). In that case search with the user's own words.
             search_text: str = query if len(sub_queries) == 1 else sub_query
             docs: list[Document] = self.retriever.invoke(search_text)
+            if chunks_per_sub_query:
+                docs = docs[:chunks_per_sub_query]
             for doc in docs:
                 chunk_id: str = doc.metadata.get(
                     "chunk_id",

@@ -117,6 +117,7 @@ Scoring rules:
 - Financial tables in the Context usually give numbers in millions. An Answer figure that is the same number in other units or rounded (for example, $44,477 million written as $44.5 billion) IS supported by the Context.
 - A statement that something is not disclosed or not found in the provided excerpts is NOT an unsupported claim.
 - Score faithfulness by the share of claims that are supported. Do not give 0.0 unless most claims are invented or contradict the Context.
+- Relevance is about whether the Answer gives what the Question asks for. If the Answer gives NONE of the requested figures or facts and only says they are unavailable or not in the excerpts, relevance is at most 0.3: an honest refusal is faithful, but it does not answer the question. If the Answer does give the main requested figure or fact and only notes that some secondary detail is missing, score relevance by the share of the Question that is answered.
 
 1. 'faithfulness' (0.0–1.0): Is EVERY claim in the Answer directly supported by the Context?
    - 1.0: Every fact traces back to a specific passage in the Context.
